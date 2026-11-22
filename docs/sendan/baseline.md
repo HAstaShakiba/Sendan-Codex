@@ -2,6 +2,8 @@
 
 AICLI-115 through AICLI-118 use [Codex 0.171.0](https://github.com/openai/codex/releases/tag/rust-v0.171.0), commit `ccf9be8cc458bd6b8336fe84d68d8893f2691a5e`. The existing Sendan integration already targets this version. The first validation target is Linux x86-64 GNU on Ubuntu 24.04. The upstream release matrix also builds Linux musl, macOS, and Windows packages.
 
+Upstream publishes tagged artifacts through its [release workflow](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/.github/workflows/rust-release.yml). Its [security policy](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/SECURITY.md) describes the upstream advisory and incident reporting process.
+
 ## Build and test
 
 Use [Sendan Codex baseline](../../.github/workflows/sendan-codex-baseline.yml) for the exact runner, toolchain, native dependencies, and checked V8 inputs. It checks out the upstream commit directly. Cargo refreshes the published lockfile in the build checkout, as in upstream release CI, and the workflow records its diff and checksum. Run the same commands in a clean checkout with Rust `1.99.1`, the workflow's native dependencies, and its verified `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`.
@@ -27,7 +29,7 @@ RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local cargo nextest run --locked --no-fai
 
 The exec suite exercises a real CLI process with an upstream loopback Responses API fixture. For example, `exec_appends_piped_stdin_to_prompt_argument` submits a task, checks process success, and verifies the request body. This is a credential-free check. The workflow link records the current verification result.
 
-The baseline workflow uses upstream's package builder with the CLI, code-mode host, executor, and bubblewrap built from the same SHA. It stages the supplied notices and provenance metadata in the validation archive and launches the packaged CLI. Download the package manifest and archive checksum from the CI run. The binary archive is a CI validation output pending the redistribution review below.
+The baseline workflow uses upstream's package builder with the CLI, code-mode host, executor, and bubblewrap built from the same SHA. It stages the supplied notices and provenance metadata in the validation archive and launches the packaged CLI. The [Linux build and archive smoke checks](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022654933) passed. Download the [package manifest and archive checksum](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022654933/artifacts/14755161112). The binary archive is a CI validation output pending the redistribution review below.
 
 ## Source map
 
@@ -98,3 +100,7 @@ Start the later provider work in `codex-model-provider`, the core request setup,
 The [Apache-2.0 LICENSE](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/LICENSE) and [NOTICE](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/NOTICE) cover the upstream source and include Ratatui attribution. Preserve these files with the package. Review the vendored bubblewrap LGPL terms in `codex-rs/vendor/bubblewrap/{COPYING,LICENSE}`, V8 and embedded native dependencies, resource and skill licenses, and any bundled ripgrep or voice components against the actual artifact contents. Record the upstream source and part-specific notices, plus the mechanism for any applicable source or relinking obligations.
 
 Download the Cargo CycloneDX SBOMs and declared-license TSV from [Sendan Codex dependency inventory](../../.github/workflows/sendan-codex-inventory.yml). Compare the Rust graph with the built binaries and native/resource inventory, and review missing or conflicting declarations. The workflow also runs the upstream [cargo-deny policy](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/codex-rs/deny.toml). Unresolved license or security findings block release. Upstream trademark and provider entitlement review are separate release requirements. Keep original CLI executable names and strings in this baseline. Record SHA, patch version, target and checksums in distribution metadata.
+
+The [inventory artifact](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022503496/artifacts/14753833685) includes four Rust SBOMs and 1,325 Cargo license entries. The [audit run](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022503496) passed the licenses, bans, and sources checks. Its advisory check reported `RUSTSEC-2026-0592` in `url 2.5.8` with a fix at `2.5.9` or later. Keep this pinned dependency set for baseline comparisons and require a clean audit on the release candidate.
+
+The bundled ripgrep 15.2.0 archive matched the upstream DotSlash SHA-256 and contains `UNLICENSE`, `LICENSE-MIT`, and `COPYING`. Collect those exact notices for redistribution. The dependency inventory includes the matching ripgrep and V8 release manifests. The native redistribution review remains open for the V8 binary and its linked components.
