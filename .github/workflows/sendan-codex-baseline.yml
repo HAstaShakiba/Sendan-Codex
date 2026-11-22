@@ -71,6 +71,33 @@ jobs:
           target/debug/codex --version
           target/debug/codex exec --help
           target/debug/codex app-server --help
+      - name: Assemble and smoke-test the Linux package
+        run: |
+          STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked --bin codex-code-mode-host --bin codex-exec-server
+          package="$RUNNER_TEMP/sendan-codex-package"
+          evidence="$RUNNER_TEMP/sendan-codex-package-evidence"
+          mkdir -p "$evidence"
+          python3 ../scripts/build_codex_package.py --target x86_64-unknown-linux-gnu \
+            --entrypoint-bin target/debug/codex --bwrap-bin target/debug/bwrap \
+            --code-mode-host-bin target/debug/codex-code-mode-host \
+            --exec-server-bin target/debug/codex-exec-server --package-dir "$package"
+          cp ../LICENSE ../NOTICE "$package/"
+          cp vendor/bubblewrap/COPYING "$package/bubblewrap-COPYING"
+          cp vendor/bubblewrap/LICENSE "$package/bubblewrap-LICENSE"
+          jq -n --arg sha "$CODEX_UPSTREAM_SHA" \
+            '{upstream_sha:$sha, aicli_patch_version:0, target:"x86_64-unknown-linux-gnu", cargo_profile:"dev"}' \
+            > "$package/sendan-provenance.json"
+          tar -C "$package" -czf "$RUNNER_TEMP/sendan-codex-linux-x64.tar.gz" .
+          (cd "$RUNNER_TEMP" && sha256sum sendan-codex-linux-x64.tar.gz) > "$evidence/SHA256SUMS"
+          cp "$package/sendan-provenance.json" "$package/codex-package.json" "$evidence/"
+          export CODEX_HOME=$(mktemp -d)
+          "$package/bin/codex" --version
+          "$package/bin/codex" app-server --help
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sendan-codex-linux-package-evidence
+          path: ${{ runner.temp }}/sendan-codex-package-evidence/
+          if-no-files-found: error
       - name: Run upstream core suites
         run: |
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast \
