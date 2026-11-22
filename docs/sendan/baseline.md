@@ -4,7 +4,7 @@ AICLI-115 through AICLI-118 use [Codex 0.171.0](https://github.com/openai/codex/
 
 ## Build and test
 
-Use [Sendan Codex baseline](../../.github/workflows/sendan-codex-baseline.yml) for the exact runner, toolchain, native dependencies, and checked V8 inputs. It checks out the upstream commit directly and uses `Cargo.lock`. Run the same commands in the clean checkout with Rust `1.99.1`, the workflow's native dependencies, and its verified `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`.
+Use [Sendan Codex baseline](../../.github/workflows/sendan-codex-baseline.yml) for the exact runner, toolchain, native dependencies, and checked V8 inputs. It checks out the upstream commit directly. Cargo refreshes the published lockfile in the build checkout, as in upstream release CI, and the workflow records its diff and checksum. Run the same commands in a clean checkout with Rust `1.99.1`, the workflow's native dependencies, and its verified `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`.
 
 ```sh
 git clone --origin upstream --branch rust-v0.171.0 --depth 1 https://github.com/openai/codex.git
@@ -14,7 +14,7 @@ test -z "$(git status --porcelain)"
 cd codex-rs
 export STABLE_GIT_COMMIT="$(git rev-parse HEAD)"
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
-cargo build --locked --bin bwrap
+cargo build --bin bwrap
 export CODEX_BWRAP_SHA256="$(sha256sum target/debug/bwrap | cut -d' ' -f1)"
 cargo build --locked -p codex-cli --bin codex
 target/debug/codex --version
