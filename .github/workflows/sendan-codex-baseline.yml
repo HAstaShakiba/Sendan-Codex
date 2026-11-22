@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sendan-codex-baseline-${{ github.ref }}
+  group: sendan-codex-baseline-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:
@@ -51,10 +51,11 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$CODEX_UPSTREAM_SHA"
           test -z "$(git status --porcelain)"
+      - uses: ./.github/actions/setup-ci
       - name: Install native build dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev libssl-dev cmake clang libclang-dev protobuf-compiler ripgrep
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev libssl-dev cmake clang libclang-dev protobuf-compiler ripgrep bubblewrap
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
       - uses: ./.github/actions/setup-rusty-v8
         with:
@@ -66,7 +67,9 @@ jobs:
         id: build
         run: |
           cargo build --bin bwrap
-          export CODEX_BWRAP_SHA256=$(sha256sum target/debug/bwrap | cut -d' ' -f1)
+          bin_dir="$CARGO_TARGET_DIR/debug"
+          install -D "$bin_dir/bwrap" "$bin_dir/codex-resources/bwrap"
+          export CODEX_BWRAP_SHA256=$(sha256sum "$bin_dir/bwrap" | cut -d' ' -f1)
           printf 'CODEX_BWRAP_SHA256=%s\n' "$CODEX_BWRAP_SHA256" >> "$GITHUB_ENV"
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked -p codex-cli --bin codex
       - name: Record build dependency resolution
@@ -79,9 +82,9 @@ jobs:
       - name: Smoke-test the built binary
         run: |
           export CODEX_HOME=$(mktemp -d)
-          target/debug/codex --version
-          target/debug/codex exec --help
-          target/debug/codex app-server --help
+          "$CARGO_TARGET_DIR/debug/codex" --version
+          "$CARGO_TARGET_DIR/debug/codex" exec --help
+          "$CARGO_TARGET_DIR/debug/codex" app-server --help
       - name: Assemble and smoke-test the Linux package
         env:
           CODEX_REPO_ROOT: ${{ github.workspace }}
@@ -89,11 +92,12 @@ jobs:
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked --bin codex-code-mode-host --bin codex-exec-server
           package="$RUNNER_TEMP/sendan-codex-package"
           evidence="$RUNNER_TEMP/sendan-codex-package-evidence"
+          bin_dir="$CARGO_TARGET_DIR/debug"
           mkdir -p "$evidence"
           python3 ../scripts/build_codex_package.py --target x86_64-unknown-linux-gnu \
-            --entrypoint-bin target/debug/codex --bwrap-bin target/debug/bwrap \
-            --code-mode-host-bin target/debug/codex-code-mode-host \
-            --exec-server-bin target/debug/codex-exec-server --package-dir "$package"
+            --entrypoint-bin "$bin_dir/codex" --bwrap-bin "$bin_dir/bwrap" \
+            --code-mode-host-bin "$bin_dir/codex-code-mode-host" \
+            --exec-server-bin "$bin_dir/codex-exec-server" --package-dir "$package"
           cp ../LICENSE ../NOTICE "$package/"
           cp vendor/bubblewrap/COPYING "$package/bubblewrap-COPYING"
           cp vendor/bubblewrap/LICENSE "$package/bubblewrap-LICENSE"
@@ -120,6 +124,11 @@ jobs:
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast \
             -p codex-core -p codex-exec -p codex-app-server -p codex-app-server-protocol \
             -p codex-tui -p codex-config -p codex-execpolicy -p codex-linux-sandbox
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always() && !cancelled()
+        with:
+          name: sendan-codex-nextest-junit
+          path: ${{ env.CARGO_TARGET_DIR }}/nextest/local/junit.xml
       - name: Verify upstream source files remain clean
         if: always() && !cancelled()
         run: git -C .. diff --exit-code HEAD -- . ':(exclude)codex-rs/Cargo.lock'
