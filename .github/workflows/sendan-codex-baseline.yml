@@ -1,0 +1,81 @@
+name: Sendan Codex baseline
+
+on:
+  push:
+    branches: [sendan/develop]
+    paths: [.github/workflows/sendan-codex-baseline.yml]
+  pull_request:
+    branches: [sendan/develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CODEX_UPSTREAM_SHA: ccf9be8cc458bd6b8336fe84d68d8893f2691a5e
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  RUST_MIN_STACK: '8388608'
+
+jobs:
+  upstream-drift:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report upstream HEAD
+        run: |
+          upstream_head=$(git ls-remote --exit-code https://github.com/openai/codex.git refs/heads/main | cut -f1)
+          test -n "$upstream_head"
+          printf 'Pinned `%s`\n\nUpstream main `%s`\n' "$CODEX_UPSTREAM_SHA" "$upstream_head" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$upstream_head" != "$CODEX_UPSTREAM_SHA" ]]; then
+            echo '::notice::Upstream main differs from the validated baseline.'
+          fi
+
+  linux-baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: openai/codex
+          ref: ${{ env.CODEX_UPSTREAM_SHA }}
+          persist-credentials: false
+      - name: Verify upstream checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$CODEX_UPSTREAM_SHA"
+          test -z "$(git status --porcelain)"
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev libssl-dev cmake clang libclang-dev protobuf-compiler ripgrep
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+      - name: Build the unchanged Linux CLI
+        run: |
+          cargo build --locked --bin bwrap
+          export CODEX_BWRAP_SHA256=$(sha256sum target/debug/bwrap | cut -d' ' -f1)
+          printf 'CODEX_BWRAP_SHA256=%s\n' "$CODEX_BWRAP_SHA256" >> "$GITHUB_ENV"
+          STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked -p codex-cli --bin codex
+      - name: Smoke-test the built binary
+        run: |
+          export CODEX_HOME=$(mktemp -d)
+          target/debug/codex --version
+          target/debug/codex exec --help
+          target/debug/codex app-server --help
+      - name: Run upstream core suites
+        run: |
+          STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast \
+            -p codex-core -p codex-exec -p codex-app-server -p codex-app-server-protocol \
+            -p codex-tui -p codex-config -p codex-execpolicy -p codex-linux-sandbox
+      - name: Verify upstream sources and lockfile remain clean
+        if: always() && !cancelled()
+        run: git diff --exit-code HEAD
