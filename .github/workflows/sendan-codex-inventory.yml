@@ -33,17 +33,18 @@ jobs:
           cargo install --locked --version 0.5.10 cargo-cyclonedx
           out="$RUNNER_TEMP/sendan-codex-inventory"
           mkdir -p "$out/notices"
+          cargo metadata --format-version 1 --filter-platform x86_64-unknown-linux-gnu |
+            jq -r '(["package","version","declared_license","license_file","source"] | @tsv), (.packages | sort_by(.name, .version)[] | [.name, .version, (.license // ""), (.license_file // ""), (.source // "workspace")] | @tsv)' > "$out/cargo-licenses.tsv"
           cargo cyclonedx --manifest-path cli/Cargo.toml --target x86_64-unknown-linux-gnu --format json --override-filename codex-cli
           cargo cyclonedx --manifest-path bwrap/Cargo.toml --target x86_64-unknown-linux-gnu --format json --override-filename bwrap
           cp cli/codex-cli.json "$out/codex-cli.cdx.json"
           cp bwrap/bwrap.json "$out/bwrap.cdx.json"
-          cargo metadata --locked --format-version 1 --filter-platform x86_64-unknown-linux-gnu |
-            jq -r '(["package","version","declared_license","license_file","source"] | @tsv), (.packages | sort_by(.name, .version)[] | [.name, .version, (.license // ""), (.license_file // ""), (.source // "workspace")] | @tsv)' > "$out/cargo-licenses.tsv"
           cp ../LICENSE ../NOTICE "$out/notices/"
           cp vendor/bubblewrap/COPYING "$out/notices/bubblewrap-COPYING"
           cp vendor/bubblewrap/LICENSE "$out/notices/bubblewrap-LICENSE"
           git rev-parse HEAD > "$out/upstream-sha.txt"
-          git diff --exit-code HEAD
+          git diff HEAD -- Cargo.lock > "$out/cargo-lock.diff"
+          git -C .. diff --exit-code HEAD -- . ':(exclude)codex-rs/Cargo.lock'
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: sendan-codex-dependency-inventory
