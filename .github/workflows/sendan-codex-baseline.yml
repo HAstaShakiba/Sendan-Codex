@@ -37,8 +37,22 @@ jobs:
           fi
 
   linux-baseline:
+    name: Linux ${{ matrix.suite }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: package
+          - suite: core
+            packages: -p codex-core
+          - suite: app-server
+            packages: -p codex-app-server -p codex-app-server-protocol
+          - suite: clients
+            packages: -p codex-exec -p codex-tui
+          - suite: policy
+            packages: -p codex-config -p codex-execpolicy -p codex-linux-sandbox
     defaults:
       run:
         working-directory: codex-rs
@@ -61,31 +75,35 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        if: matrix.suite != 'package'
         with:
           tool: nextest
-      - name: Build the unchanged Linux CLI
-        id: build
+      - name: Build bubblewrap and record its digest
         run: |
           cargo build --bin bwrap
           bin_dir="$CARGO_TARGET_DIR/debug"
           install -D "$bin_dir/bwrap" "$bin_dir/codex-resources/bwrap"
           export CODEX_BWRAP_SHA256=$(sha256sum "$bin_dir/bwrap" | cut -d' ' -f1)
           printf 'CODEX_BWRAP_SHA256=%s\n' "$CODEX_BWRAP_SHA256" >> "$GITHUB_ENV"
-          STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked -p codex-cli --bin codex
+      - name: Build the unchanged Linux CLI
+        if: matrix.suite != 'policy'
+        run: STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked -p codex-cli --bin codex
       - name: Record build dependency resolution
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() && matrix.suite == 'package' }}
         run: |
           evidence="$RUNNER_TEMP/sendan-codex-package-evidence"
           mkdir -p "$evidence"
           git diff HEAD -- Cargo.lock > "$evidence/cargo-lock.diff"
           sha256sum Cargo.lock > "$evidence/cargo-lock.sha256"
       - name: Smoke-test the built binary
+        if: matrix.suite == 'package'
         run: |
           export CODEX_HOME=$(mktemp -d)
           "$CARGO_TARGET_DIR/debug/codex" --version
           "$CARGO_TARGET_DIR/debug/codex" exec --help
           "$CARGO_TARGET_DIR/debug/codex" app-server --help
       - name: Assemble and smoke-test the Linux package
+        if: matrix.suite == 'package'
         env:
           CODEX_REPO_ROOT: ${{ github.workspace }}
         run: |
@@ -113,21 +131,32 @@ jobs:
           "$extracted/bin/codex" --version
           "$extracted/bin/codex" app-server --help
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() && matrix.suite == 'package' }}
         with:
           name: sendan-codex-linux-package-evidence
           path: ${{ runner.temp }}/sendan-codex-package-evidence/
           if-no-files-found: warn
       - name: Run upstream core suites
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: matrix.suite != 'package'
+        env:
+          CARGO_BUILD_JOBS: '2'
+          TEST_PACKAGES: ${{ matrix.packages }}
         run: |
-          STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast \
-            -p codex-core -p codex-exec -p codex-app-server -p codex-app-server-protocol \
-            -p codex-tui -p codex-config -p codex-execpolicy -p codex-linux-sandbox
+          read -r -a packages <<< "$TEST_PACKAGES"
+          (
+            while true; do
+              df -h "$CARGO_TARGET_DIR"
+              free -m
+              sleep 45
+            done
+          ) &
+          monitor=$!
+          trap 'kill "$monitor" 2>/dev/null || true' EXIT
+          STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast "${packages[@]}"
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        if: always() && !cancelled()
+        if: ${{ always() && !cancelled() && matrix.suite != 'package' }}
         with:
-          name: sendan-codex-nextest-junit
+          name: sendan-codex-nextest-${{ matrix.suite }}-junit
           path: ${{ env.CARGO_TARGET_DIR }}/nextest/local/junit.xml
       - name: Verify upstream source files remain clean
         if: always() && !cancelled()
