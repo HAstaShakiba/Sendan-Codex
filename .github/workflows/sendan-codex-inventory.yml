@@ -35,13 +35,14 @@ jobs:
           mkdir -p "$out/notices"
           cargo metadata --format-version 1 --filter-platform x86_64-unknown-linux-gnu |
             jq -r '(["package","version","declared_license","license_file","source"] | @tsv), (.packages | sort_by(.name, .version)[] | [.name, .version, (.license // ""), (.license_file // ""), (.source // "workspace")] | @tsv)' > "$out/cargo-licenses.tsv"
-          cargo cyclonedx --manifest-path cli/Cargo.toml --target x86_64-unknown-linux-gnu --format json --override-filename codex-cli
-          cargo cyclonedx --manifest-path bwrap/Cargo.toml --target x86_64-unknown-linux-gnu --format json --override-filename bwrap
-          cp cli/codex-cli.json "$out/codex-cli.cdx.json"
-          cp bwrap/bwrap.json "$out/bwrap.cdx.json"
+          cargo cyclonedx --manifest-path Cargo.toml --target x86_64-unknown-linux-gnu --format json
+          cp cli/codex-cli.cdx.json bwrap/codex-bwrap.cdx.json \
+            code-mode-host/codex-code-mode-host.cdx.json exec-server-cli/codex-exec-server-cli.cdx.json "$out/"
           cp ../LICENSE ../NOTICE "$out/notices/"
           cp vendor/bubblewrap/COPYING "$out/notices/bubblewrap-COPYING"
           cp vendor/bubblewrap/LICENSE "$out/notices/bubblewrap-LICENSE"
+          cp ../scripts/codex_package/rg "$out/ripgrep-dotslash-manifest"
+          cp ../third_party/v8/*_release_manifests.sha256 "$out/"
           git rev-parse HEAD > "$out/upstream-sha.txt"
           git diff HEAD -- Cargo.lock > "$out/cargo-lock.diff"
           git -C .. diff --exit-code HEAD -- . ':(exclude)codex-rs/Cargo.lock'
