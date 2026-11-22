@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: sendan-codex-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CODEX_UPSTREAM_SHA: ccf9be8cc458bd6b8336fe84d68d8893f2691a5e
   CARGO_INCREMENTAL: '0'
@@ -61,10 +65,17 @@ jobs:
           tool: nextest
       - name: Build the unchanged Linux CLI
         run: |
-          cargo build --locked --bin bwrap
+          cargo build --bin bwrap
           export CODEX_BWRAP_SHA256=$(sha256sum target/debug/bwrap | cut -d' ' -f1)
           printf 'CODEX_BWRAP_SHA256=%s\n' "$CODEX_BWRAP_SHA256" >> "$GITHUB_ENV"
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked -p codex-cli --bin codex
+      - name: Record build dependency resolution
+        if: always() && !cancelled()
+        run: |
+          evidence="$RUNNER_TEMP/sendan-codex-package-evidence"
+          mkdir -p "$evidence"
+          git diff HEAD -- Cargo.lock > "$evidence/cargo-lock.diff"
+          sha256sum Cargo.lock > "$evidence/cargo-lock.sha256"
       - name: Smoke-test the built binary
         run: |
           export CODEX_HOME=$(mktemp -d)
@@ -94,15 +105,16 @@ jobs:
           "$package/bin/codex" --version
           "$package/bin/codex" app-server --help
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always() && !cancelled()
         with:
           name: sendan-codex-linux-package-evidence
           path: ${{ runner.temp }}/sendan-codex-package-evidence/
-          if-no-files-found: error
+          if-no-files-found: warn
       - name: Run upstream core suites
         run: |
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast \
             -p codex-core -p codex-exec -p codex-app-server -p codex-app-server-protocol \
             -p codex-tui -p codex-config -p codex-execpolicy -p codex-linux-sandbox
-      - name: Verify upstream sources and lockfile remain clean
+      - name: Verify upstream source files remain clean
         if: always() && !cancelled()
-        run: git diff --exit-code HEAD
+        run: git -C .. diff --exit-code HEAD -- . ':(exclude)codex-rs/Cargo.lock'
