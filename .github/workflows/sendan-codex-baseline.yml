@@ -45,7 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: openai/codex
           ref: ${{ env.CODEX_UPSTREAM_SHA }}
           persist-credentials: false
       - name: Verify upstream checkout
@@ -64,6 +63,7 @@ jobs:
         with:
           tool: nextest
       - name: Build the unchanged Linux CLI
+        id: build
         run: |
           cargo build --bin bwrap
           export CODEX_BWRAP_SHA256=$(sha256sum target/debug/bwrap | cut -d' ' -f1)
@@ -83,6 +83,8 @@ jobs:
           target/debug/codex exec --help
           target/debug/codex app-server --help
       - name: Assemble and smoke-test the Linux package
+        env:
+          CODEX_REPO_ROOT: ${{ github.workspace }}
         run: |
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked --bin codex-code-mode-host --bin codex-exec-server
           package="$RUNNER_TEMP/sendan-codex-package"
@@ -102,8 +104,10 @@ jobs:
           (cd "$RUNNER_TEMP" && sha256sum sendan-codex-linux-x64.tar.gz) > "$evidence/SHA256SUMS"
           cp "$package/sendan-provenance.json" "$package/codex-package.json" "$evidence/"
           export CODEX_HOME=$(mktemp -d)
-          "$package/bin/codex" --version
-          "$package/bin/codex" app-server --help
+          extracted=$(mktemp -d)
+          tar -xzf "$RUNNER_TEMP/sendan-codex-linux-x64.tar.gz" -C "$extracted"
+          "$extracted/bin/codex" --version
+          "$extracted/bin/codex" app-server --help
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: always() && !cancelled()
         with:
@@ -111,6 +115,7 @@ jobs:
           path: ${{ runner.temp }}/sendan-codex-package-evidence/
           if-no-files-found: warn
       - name: Run upstream core suites
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast \
             -p codex-core -p codex-exec -p codex-app-server -p codex-app-server-protocol \
