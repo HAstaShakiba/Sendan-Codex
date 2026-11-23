@@ -1087,6 +1087,62 @@ fn split_policy_reenables_nested_writable_subpaths_after_read_only_parent() {
 }
 
 #[test]
+fn restricted_read_child_remains_visible_beneath_denied_parent() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let denied_parent = temp_dir.path().join("private");
+    let readable_child = denied_parent.join("active-helper");
+    std::fs::create_dir_all(&readable_child).expect("create readable child");
+    let denied_parent = AbsolutePathBuf::from_absolute_path(&denied_parent)
+        .expect("absolute denied parent");
+    let readable_child = AbsolutePathBuf::from_absolute_path(&readable_child)
+        .expect("absolute readable child");
+    let policy = FileSystemSandboxPolicy::restricted(vec![
+        FileSystemSandboxEntry::new(denied_parent.clone().into(), FileSystemAccessMode::Deny),
+        FileSystemSandboxEntry::new(readable_child.clone().into(), FileSystemAccessMode::Read),
+    ]);
+
+    let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
+        .expect("filesystem args");
+    let denied_parent = path_to_string(denied_parent.as_path());
+    let readable_child = path_to_string(readable_child.as_path());
+
+    assert!(
+        !args
+            .args
+            .windows(2)
+            .any(|window| window == ["--tmpfs", denied_parent.as_str()]),
+        "a post-mount parent mask would hide the explicitly readable child: {:#?}",
+        args.args
+    );
+    assert!(args.args.windows(3).any(|window| {
+        window == ["--ro-bind", readable_child.as_str(), readable_child.as_str()]
+    }));
+}
+
+#[test]
+fn restricted_read_child_keeps_deny_mask_when_parent_is_readable() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let denied_child = temp_dir.path().join("private");
+    std::fs::create_dir_all(&denied_child).expect("create denied child");
+    let readable_parent = AbsolutePathBuf::from_absolute_path(temp_dir.path())
+        .expect("absolute readable parent");
+    let denied_child =
+        AbsolutePathBuf::from_absolute_path(&denied_child).expect("absolute denied child");
+    let policy = FileSystemSandboxPolicy::restricted(vec![
+        FileSystemSandboxEntry::new(readable_parent.into(), FileSystemAccessMode::Read),
+        FileSystemSandboxEntry::new(denied_child.clone().into(), FileSystemAccessMode::Deny),
+    ]);
+
+    let args = create_filesystem_args(&policy, temp_dir.path(), BwrapOptions::default())
+        .expect("filesystem args");
+    let denied_child = path_to_string(denied_child.as_path());
+
+    assert!(args.args.windows(2).any(|window| {
+        window == ["--tmpfs", denied_child.as_str()]
+    }));
+}
+
+#[test]
 fn split_policy_reenables_writable_subpaths_after_unreadable_parent() {
     let temp_dir = TempDir::new().expect("temp dir");
     let blocked = temp_dir.path().join("blocked");

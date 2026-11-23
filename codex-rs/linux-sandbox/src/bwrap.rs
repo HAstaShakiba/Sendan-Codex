@@ -484,6 +484,7 @@ fn create_filesystem_args(
     unreadable_roots.sort();
     unreadable_roots.dedup();
 
+    let mut readable_roots_for_mounts = BTreeSet::new();
     let mut args = if resolved.has_full_disk_read_access {
         // Read-only root, then mount a minimal device tree.
         // In bubblewrap (`bubblewrap.c`, `SETUP_MOUNT_DEV`), `--dev /dev`
@@ -538,7 +539,7 @@ fn create_filesystem_args(
                 "/dev".to_string(),
             ];
         } else {
-            for root in readable_roots {
+            for root in &readable_roots {
                 if !root.exists() {
                     continue;
                 }
@@ -550,9 +551,9 @@ fn create_filesystem_args(
                     .iter()
                     .any(|writable_root| root.starts_with(writable_root.root.as_path()))
                 {
-                    canonical_target_if_symlinked_path(&root).unwrap_or(root)
+                    canonical_target_if_symlinked_path(root).unwrap_or_else(|| root.clone())
                 } else {
-                    root
+                    root.clone()
                 };
                 args.push("--ro-bind".to_string());
                 args.push(path_to_string(&mount_root));
@@ -560,6 +561,7 @@ fn create_filesystem_args(
                 append_daemon_socket_masks(&mut args, &mount_root, &daemon_directories)?;
             }
         }
+        readable_roots_for_mounts = readable_roots;
 
         args
     };
@@ -748,6 +750,10 @@ fn create_filesystem_args(
             !allowed_write_paths
                 .iter()
                 .any(|root| unreadable_root.starts_with(root) || root.starts_with(unreadable_root))
+                && !should_skip_unreadable_mask_for_readable_descendant(
+                    unreadable_root,
+                    &readable_roots_for_mounts,
+                )
         })
         .cloned()
         .collect();
@@ -780,6 +786,23 @@ fn create_filesystem_args(
     }
 
     Ok(bwrap_args)
+}
+
+fn should_skip_unreadable_mask_for_readable_descendant(
+    unreadable_root: &Path,
+    readable_roots: &BTreeSet<PathBuf>,
+) -> bool {
+    // In the empty-root restricted profile, the denied directory is only a
+    // mountpoint skeleton. Re-masking it after mounting an explicitly readable
+    // child would hide that child too. Keep the parent skeleton and its
+    // explicitly approved child mount visible; any other child remains absent.
+    // A readable ancestor means the deny must stay in place to hide its contents.
+    !readable_roots
+        .iter()
+        .any(|root| unreadable_root.starts_with(root.as_path()))
+        && readable_roots.iter().any(|root| {
+            root != unreadable_root && root.starts_with(unreadable_root)
+        })
 }
 
 fn append_metadata_path_masks_for_writable_root(

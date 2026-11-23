@@ -56,9 +56,11 @@ The baseline workflow uses upstream's package builder with the CLI, code-mode ho
 | Core | 6,262 | 0 | 9 | Three tests passed on retry |
 | Config, execpolicy, and Linux sandbox | 715 | 0 | 3 | |
 | App Server and Protocol | 2,598 | 0 | 3 | Retried the job after an HTTP 403 during V8 download |
-| Exec and TUI | 6,478 | 1 | 8 | `nested_apply_patch_alias_works_with_restricted_reads` failed with `Permission denied` on both official commits |
+| Exec and TUI, config, execpolicy, and Linux sandbox | 7,196 | 0 | 11 | All client and policy tests passed after the narrow Linux sandbox fix |
 
-The [source test run](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45131817065) retains these counts in the nextest job logs. The JUnit upload found no report files in this run. The package job in this run hit an HTTP 403 during dependency setup. The successful release-tag build and archive checks are linked above. The release pin remains the baseline for investigating the reproducible client test failure.
+The [baseline validation run](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45175908110) passed both new `codex-linux-sandbox` regressions, the formerly failing `nested_apply_patch_alias_works_with_restricted_reads` integration test, and all 7,196 client and policy tests (11 skipped). The workflow also verified that the upstream source checkout was clean after restoring its release manifest and lockfile.
+
+The failure was caused by a rootless deny mask hiding an explicitly readable descendant beneath a denied parent. The fix omits that redundant mask only when the restricted empty-root filesystem has no readable ancestor exposing the denied parent; regression coverage keeps the mask when a broader readable root exists. Build caching is configured with sccache in the workflow, but this dispatched run did not include the cache steps, so cache hits and speedup are not yet verified.
 
 ## Source map
 
