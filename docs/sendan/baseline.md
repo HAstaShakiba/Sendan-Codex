@@ -2,6 +2,8 @@
 
 AICLI-115 through AICLI-118 use [Codex 0.171.0](https://github.com/openai/codex/releases/tag/rust-v0.171.0), commit `ccf9be8cc458bd6b8336fe84d68d8893f2691a5e`. The existing Sendan integration already targets this version. The first validation target is Linux x86-64 GNU on Ubuntu 24.04. The upstream release matrix also builds Linux musl, macOS, and Windows packages.
 
+The source test matrix uses the official release parent `9e59e679c183ea69bc71cf90b8fe84e5bc83bc51`. CI verifies that the release commit changes only the workspace version from `0.0.0` to `0.171.0`. This keeps the upstream TUI snapshots on their expected development version while the built archive and its smoke tests use the exact release tag. [Upstream release commit](https://github.com/openai/codex/commit/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e)
+
 Upstream publishes tagged artifacts through its [release workflow](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/.github/workflows/rust-release.yml). Its [security policy](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/SECURITY.md) describes the upstream advisory and incident reporting process.
 
 ## Build and test
@@ -22,12 +24,28 @@ cargo build --locked -p codex-cli --bin codex
 target/debug/codex --version
 target/debug/codex exec --help
 target/debug/codex app-server --help
+```
+
+Run the source tests in a separate checkout to preserve the built release.
+
+```sh
+git clone --origin upstream --branch rust-v0.171.0 --depth 2 https://github.com/openai/codex.git codex-test
+cd codex-test
+git switch --detach 9e59e679c183ea69bc71cf90b8fe84e5bc83bc51
+cd codex-rs
+export STABLE_GIT_COMMIT="$(git rev-parse HEAD)"
+export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+cargo build --bin bwrap
+install -D target/debug/bwrap target/debug/codex-resources/bwrap
+export CODEX_BWRAP_SHA256="$(sha256sum target/debug/bwrap | cut -d' ' -f1)"
+cargo build --locked --bin codex --bin codex-code-mode-host --bin codex-exec-server \
+  --bin codex-linux-sandbox --bin test_stdio_server --bin codex-message-board-mcp
 RUST_MIN_STACK=8388608 NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast \
   -p codex-core -p codex-exec -p codex-app-server -p codex-app-server-protocol \
   -p codex-tui -p codex-config -p codex-execpolicy -p codex-linux-sandbox
 ```
 
-The exec suite exercises a real CLI process with an upstream loopback Responses API fixture. For example, `exec_appends_piped_stdin_to_prompt_argument` submits a task, checks process success, and verifies the request body. This is a credential-free check. The workflow link records the current verification result.
+The exec suite exercises a real CLI process with an upstream loopback Responses API fixture. `exec_appends_piped_stdin_to_prompt_argument` passed on the release tag and verified the request body in a credential-free run. The [release-tag test logs](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45024817878) also record 715 passing policy tests. That test run exposed the release-version snapshot differences and missing integration helpers that motivated the test matrix above.
 
 The baseline workflow uses upstream's package builder with the CLI, code-mode host, executor, and bubblewrap built from the same SHA. It stages the supplied notices and provenance metadata in the validation archive and launches the packaged CLI. The [Linux build and archive smoke checks](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022654933) passed. Download the [package manifest and archive checksum](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022654933/artifacts/14755161112). The binary archive is a CI validation output pending the redistribution review below.
 
