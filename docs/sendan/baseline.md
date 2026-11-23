@@ -49,6 +49,17 @@ The exec suite exercises a real CLI process with an upstream loopback Responses 
 
 The baseline workflow uses upstream's package builder with the CLI, code-mode host, executor, and bubblewrap built from the same SHA. It stages the supplied notices and provenance metadata in the validation archive and launches the packaged CLI. The [Linux build and archive smoke checks](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022654933) passed. Download the [package manifest and archive checksum](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45022654933/artifacts/14755161112). The binary archive is a CI validation output pending the redistribution review below.
 
+### Source suite results
+
+| Suite | Passed | Failed | Skipped | Notes |
+| --- | ---: | ---: | ---: | --- |
+| Core | 6,262 | 0 | 9 | Three tests passed on retry |
+| Config, execpolicy, and Linux sandbox | 715 | 0 | 3 | |
+| App Server and Protocol | 2,598 | 0 | 3 | Retried the job after an HTTP 403 during V8 download |
+| Exec and TUI | 6,478 | 1 | 8 | `nested_apply_patch_alias_works_with_restricted_reads` failed with `Permission denied` on both official commits |
+
+The [source test run](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45131817065) retains these counts in the nextest job logs. The JUnit upload found no report files in this run. The package job in this run hit an HTTP 403 during dependency setup. The successful release-tag build and archive checks are linked above. The release pin remains the baseline for investigating the reproducible client test failure.
+
 ## Source map
 
 All source links point to the pinned commit. The [workspace manifest](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/codex-rs/Cargo.toml) lists crate membership and dependency edges.
