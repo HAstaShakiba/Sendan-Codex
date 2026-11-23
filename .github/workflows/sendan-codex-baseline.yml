@@ -17,6 +17,7 @@ concurrency:
 
 env:
   CODEX_UPSTREAM_SHA: ccf9be8cc458bd6b8336fe84d68d8893f2691a5e
+  CODEX_TEST_SHA: 9e59e679c183ea69bc71cf90b8fe84e5bc83bc51
   CARGO_INCREMENTAL: '0'
   CARGO_PROFILE_DEV_DEBUG: '0'
   CARGO_PROFILE_TEST_DEBUG: '0'
@@ -59,12 +60,22 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ env.CODEX_UPSTREAM_SHA }}
+          ref: ${{ matrix.suite == 'package' && env.CODEX_UPSTREAM_SHA || env.CODEX_TEST_SHA }}
           persist-credentials: false
       - name: Verify upstream checkout
+        env:
+          TEST_SUITE: ${{ matrix.suite }}
         run: |
-          test "$(git rev-parse HEAD)" = "$CODEX_UPSTREAM_SHA"
           test -z "$(git status --porcelain)"
+          if [[ "$TEST_SUITE" == package ]]; then
+            test "$(git rev-parse HEAD)" = "$CODEX_UPSTREAM_SHA"
+          else
+            test "$(git rev-parse HEAD)" = "$CODEX_TEST_SHA"
+            git fetch --no-tags --depth=2 origin "$CODEX_UPSTREAM_SHA"
+            test "$(git rev-parse "$CODEX_UPSTREAM_SHA^")" = "$CODEX_TEST_SHA"
+            test "$(git diff --name-only HEAD "$CODEX_UPSTREAM_SHA")" = codex-rs/Cargo.toml
+            git show "$CODEX_UPSTREAM_SHA:codex-rs/Cargo.toml" | sed 's/^version = "0\.171\.0"$/version = "0.0.0"/' | diff -u Cargo.toml -
+          fi
       - uses: ./.github/actions/setup-ci
       - name: Install native build dependencies
         run: |
@@ -78,6 +89,7 @@ jobs:
         if: matrix.suite != 'package'
         with:
           tool: nextest
+          version: 0.9.103
       - name: Build bubblewrap and record its digest
         run: |
           cargo build --bin bwrap
@@ -86,8 +98,14 @@ jobs:
           export CODEX_BWRAP_SHA256=$(sha256sum "$bin_dir/bwrap" | cut -d' ' -f1)
           printf 'CODEX_BWRAP_SHA256=%s\n' "$CODEX_BWRAP_SHA256" >> "$GITHUB_ENV"
       - name: Build the unchanged Linux CLI
-        if: matrix.suite != 'policy'
+        if: matrix.suite == 'package'
         run: STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" cargo build --locked -p codex-cli --bin codex
+      - name: Build runtime and integration-test helpers
+        if: matrix.suite != 'package' && matrix.suite != 'policy'
+        run: |
+          STABLE_GIT_COMMIT="$CODEX_TEST_SHA" cargo build --locked \
+            --bin codex --bin codex-code-mode-host --bin codex-exec-server \
+            --bin codex-linux-sandbox --bin test_stdio_server
       - name: Record build dependency resolution
         if: ${{ always() && !cancelled() && matrix.suite == 'package' }}
         run: |
@@ -152,12 +170,12 @@ jobs:
           ) &
           monitor=$!
           trap 'kill "$monitor" 2>/dev/null || true' EXIT
-          STABLE_GIT_COMMIT="$CODEX_UPSTREAM_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast "${packages[@]}"
+          STABLE_GIT_COMMIT="$CODEX_TEST_SHA" NEXTEST_PROFILE=local cargo nextest run --locked --no-fail-fast "${packages[@]}"
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         if: ${{ always() && !cancelled() && matrix.suite != 'package' }}
         with:
           name: sendan-codex-nextest-${{ matrix.suite }}-junit
-          path: ${{ env.CARGO_TARGET_DIR }}/nextest/local/junit.xml
+          path: codex-rs/target/nextest/local/junit.xml
       - name: Verify upstream source files remain clean
         if: always() && !cancelled()
         run: git -C .. diff --exit-code HEAD -- . ':(exclude)codex-rs/Cargo.lock'
