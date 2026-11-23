@@ -105,7 +105,7 @@ jobs:
         run: |
           STABLE_GIT_COMMIT="$CODEX_TEST_SHA" cargo build --locked \
             --bin codex --bin codex-code-mode-host --bin codex-exec-server \
-            --bin codex-linux-sandbox --bin test_stdio_server
+            --bin codex-linux-sandbox --bin test_stdio_server --bin codex-message-board-mcp
       - name: Record build dependency resolution
         if: ${{ always() && !cancelled() && matrix.suite == 'package' }}
         run: |
