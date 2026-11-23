@@ -39,6 +39,7 @@ jobs:
 
   linux-baseline:
     name: Linux ${{ matrix.suite }}
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/codex/ci-test-profile'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
@@ -178,4 +179,68 @@ jobs:
           path: codex-rs/target/nextest/local/junit.xml
       - name: Verify upstream source files remain clean
         if: always() && !cancelled()
+        run: git -C .. diff --exit-code HEAD -- . ':(exclude)codex-rs/Cargo.lock'
+
+  focused-apply-patch-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/ci-test-profile'
+    name: Focused apply_patch diagnostic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.CODEX_TEST_SHA }}
+          persist-credentials: false
+      - name: Verify pinned source relationship
+        run: |
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$CODEX_TEST_SHA"
+          git fetch --no-tags --depth=2 origin "$CODEX_UPSTREAM_SHA"
+          test "$(git rev-parse "$CODEX_UPSTREAM_SHA^")" = "$CODEX_TEST_SHA"
+          test "$(git diff --name-only HEAD "$CODEX_UPSTREAM_SHA")" = codex-rs/Cargo.toml
+          git show "$CODEX_UPSTREAM_SHA:codex-rs/Cargo.toml" | sed 's/^version = "0\.171\.0"$/version = "0.0.0"/' | diff -u Cargo.toml -
+      - uses: ./.github/actions/setup-ci
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev libssl-dev cmake clang libclang-dev protobuf-compiler ripgrep bubblewrap
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+      - name: Build matching bubblewrap and test helpers
+        run: |
+          target=x86_64-unknown-linux-gnu
+          cargo build --target "$target" --profile ci-test --bin bwrap
+          bin_dir="$CARGO_TARGET_DIR/$target/ci-test"
+          install -D "$bin_dir/bwrap" "$bin_dir/codex-resources/bwrap"
+          export CODEX_BWRAP_SHA256=$(sha256sum "$bin_dir/bwrap" | cut -d' ' -f1)
+          printf 'CODEX_BWRAP_SHA256=%s\n' "$CODEX_BWRAP_SHA256" >> "$GITHUB_ENV"
+          STABLE_GIT_COMMIT="$CODEX_TEST_SHA" cargo build --locked --target "$target" --profile ci-test \
+            --bin codex --bin codex-exec --bin codex-linux-sandbox
+      - name: Run only the failing test with upstream CI profile
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          target=x86_64-unknown-linux-gnu
+          sandbox_helper="$CARGO_TARGET_DIR/$target/ci-test/codex-linux-sandbox"
+          env \
+            "CARGO_BIN_EXE_codex-linux-sandbox=$sandbox_helper" \
+            "CARGO_BIN_EXE_codex_linux_sandbox=$sandbox_helper" \
+            "STABLE_GIT_COMMIT=$CODEX_TEST_SHA" \
+            NEXTEST_PROFILE=local \
+            cargo nextest run --locked --target "$target" --cargo-profile ci-test \
+              -p codex-exec \
+              --filter-expr 'test(nested_apply_patch_alias_works_with_restricted_reads)'
+      - name: Verify upstream source files remain clean
+        if: always()
         run: git -C .. diff --exit-code HEAD -- . ':(exclude)codex-rs/Cargo.lock'

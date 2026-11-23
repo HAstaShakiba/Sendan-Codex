@@ -60,6 +60,8 @@ The baseline workflow uses upstream's package builder with the CLI, code-mode ho
 
 The [source test run](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45131817065) retains these counts in the nextest job logs. The JUnit upload found no report files in this run. The package job in this run hit an HTTP 403 during dependency setup. The successful release-tag build and archive checks are linked above. The release pin remains the baseline for investigating the reproducible client test failure.
 
+A focused rerun used upstream's `ci-test` profile, Linux GNU target, and explicit `codex-linux-sandbox` helper path; the same test still failed with `patch.sh: 2: apply_patch: Permission denied`. Its source-clean check passed. See the [focused diagnostic run](https://github.com/HAstaShakiba/Sendan-Codex/actions/runs/45158342862). This rules out the earlier workflow's Cargo profile and helper-path setup as the cause; the sandbox execution failure remains unresolved.
+
 ## Source map
 
 All source links point to the pinned commit. The [workspace manifest](https://github.com/openai/codex/blob/ccf9be8cc458bd6b8336fe84d68d8893f2691a5e/codex-rs/Cargo.toml) lists crate membership and dependency edges.
